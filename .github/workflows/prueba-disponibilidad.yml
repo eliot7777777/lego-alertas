@@ -9,55 +9,34 @@ jobs:
   probar:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
     steps:
       - name: Preparar Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Instalar biblioteca de disponibilidad
-        run: |
-          python -m pip install lego-store-availability==0.2.1
+      - name: Instalar biblioteca
+        run: python -m pip install lego-store-availability==0.2.1
 
       - name: Consultar productos de España
         shell: python
         run: |
           from lego_store_availability import LegoAPI
 
-          print("Preparando consulta para LEGO España...", flush=True)
-
-          try:
-              lego = LegoAPI()
-              tienda = lego.store(lang="es-es")
-          except Exception as error:
-              print(
-                  f"Error al preparar la tienda: "
-                  f"{type(error).__name__}: {error}",
-                  flush=True,
-              )
-              raise SystemExit(1)
-
-          hubo_errores = False
+          print("Preparando LEGO España...", flush=True)
+          lego = LegoAPI()
+          tienda = lego.store(lang="es-es")
+          errores = False
 
           for codigo in ("21353", "76294"):
-              print(f"\nConsultando set {codigo}...", flush=True)
-
+              print(f"Consultando {codigo}...", flush=True)
               try:
                   producto = tienda.product(product_id=codigo)
                   print(f"Nombre: {producto.name}", flush=True)
-                  print(
-                      f"Disponibilidad: {producto.availability!r}",
-                      flush=True,
-                  )
+                  print(f"Disponibilidad: {producto.availability!r}", flush=True)
               except Exception as error:
-                  hubo_errores = True
-                  print(
-                      f"Error en {codigo}: "
-                      f"{type(error).__name__}: {error}",
-                      flush=True,
-                  )
+                  errores = True
+                  print(f"{type(error).__name__}: {error}", flush=True)
 
-          if hubo_errores:
+          if errores:
               raise SystemExit(1)
-`
