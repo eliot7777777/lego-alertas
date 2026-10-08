@@ -102,6 +102,9 @@ def consultar_estado(pagina, producto):
     print(f"Respuesta HTTP: {respuesta.status}")
 
     if respuesta.status >= 400:
+        print(f"Título: {pagina.title()}")
+        contenido = pagina.locator("body").inner_text(timeout=10000)
+        print(f"Respuesta de la página: {contenido[:1500]}")
         raise RuntimeError(
             f"La página devolvió HTTP {respuesta.status}."
         )
