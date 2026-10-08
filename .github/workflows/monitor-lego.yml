@@ -2,6 +2,8 @@ name: Monitor LEGO
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '2-57/5 * * * *'
 
 permissions:
   contents: write
