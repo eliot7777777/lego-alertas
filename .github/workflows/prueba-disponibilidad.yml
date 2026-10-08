@@ -8,35 +8,104 @@ permissions: {}
 jobs:
   probar:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
+
     steps:
       - name: Preparar Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Instalar biblioteca
-        run: python -m pip install lego-store-availability==0.2.1
+      - name: Instalar Playwright y Chromium
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
 
       - name: Consultar productos de España
         shell: python
         run: |
-          from lego_store_availability import LegoAPI
+          from playwright.sync_api import sync_playwright
 
-          print("Preparando LEGO España...", flush=True)
-          lego = LegoAPI()
-          tienda = lego.store(lang="es-es")
+          productos = {
+              "76294": (
+                  "https://www.lego.com/es-es/product/"
+                  "x-men-the-x-mansion-76294"
+              ),
+              "21353": (
+                  "https://www.lego.com/es-es/product/"
+                  "the-botanical-garden-21353"
+              ),
+          }
+
+          selector = '[data-test="product-overview-availability"]'
           errores = False
 
-          for codigo in ("21353", "76294"):
-              print(f"Consultando {codigo}...", flush=True)
+          with sync_playwright() as p:
+              navegador = p.chromium.launch(headless=True)
+              contexto = navegador.new_context(
+                  locale="es-ES",
+                  user_agent=(
+                      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/153.0.0.0 Safari/537.36"
+                  ),
+              )
+              pagina = contexto.new_page()
+
               try:
-                  producto = tienda.product(product_id=codigo)
-                  print(f"Nombre: {producto.name}", flush=True)
-                  print(f"Disponibilidad: {producto.availability!r}", flush=True)
-              except Exception as error:
-                  errores = True
-                  print(f"{type(error).__name__}: {error}", flush=True)
+                  for codigo, url in productos.items():
+                      print(f"\nConsultando {codigo}...", flush=True)
+
+                      try:
+                          respuesta = pagina.goto(
+                              url,
+                              wait_until="domcontentloaded",
+                              timeout=60000,
+                          )
+
+                          if respuesta is not None:
+                              print(
+                                  f"HTTP inicial: {respuesta.status}",
+                                  flush=True,
+                              )
+
+                          # Igual que el script local: esperamos
+                          # el campo, sin abortar por el HTTP inicial.
+                          campo = pagina.locator(selector).first
+                          campo.wait_for(
+                              state="visible",
+                              timeout=30000,
+                          )
+
+                          estado = campo.inner_text().strip()
+
+                          if not estado:
+                              raise RuntimeError(
+                                  "El campo de disponibilidad está vacío."
+                              )
+
+                          print(f"ESTADO {codigo}: {estado}", flush=True)
+                          print(
+                              f"Título: {pagina.title()}",
+                              flush=True,
+                          )
+
+                      except Exception as error:
+                          errores = True
+                          print(
+                              f"ERROR {codigo}: "
+                              f"{type(error).__name__}: {error}",
+                              flush=True,
+                          )
+                          try:
+                              print(
+                                  f"Título final: {pagina.title()}",
+                                  flush=True,
+                              )
+                          except Exception:
+                              pass
+              finally:
+                  navegador.close()
 
           if errores:
               raise SystemExit(1)
