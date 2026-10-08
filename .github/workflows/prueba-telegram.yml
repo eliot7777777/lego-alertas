@@ -1,0 +1,49 @@
+name: Prueba Telegram
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  enviar-mensaje:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Enviar mensaje de prueba
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+
+          datos = urllib.parse.urlencode({
+              "chat_id": chat_id,
+              "text": "✅ ¡Funciona! Tu bot ya puede enviarte alertas de los sets 76294 y 21353."
+          }).encode()
+
+          peticion = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data=datos,
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(peticion, timeout=30) as respuesta:
+                  resultado = json.load(respuesta)
+              if not resultado.get("ok"):
+                  raise ValueError("Respuesta no válida")
+          except Exception:
+              print("No se pudo enviar el mensaje. Revisa los secretos y que hayas iniciado el bot.")
+              raise SystemExit(1)
+
+          print("Mensaje enviado correctamente.")
+          PY
