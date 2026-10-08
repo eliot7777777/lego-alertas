@@ -166,12 +166,12 @@ def main():
                 else:
                     print(f"{codigo}: sin cambios: {actual}")
 
-            except Exception:
+            except Exception as error:
                 hubo_errores = True
                 print(
-                    f"{codigo}: consulta o envío fallido. "
-                    "Se conserva el estado anterior."
+                    f"{codigo}: {type(error).__name__}: {error}"
                 )
+                print("Se conserva el estado anterior.")
 
         contexto.close()
         navegador.close()
