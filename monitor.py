@@ -96,8 +96,15 @@ def consultar_estado(pagina, producto):
         timeout=60000,
     )
 
-    if respuesta is None or respuesta.status >= 400:
-        raise RuntimeError("La página no permitió la consulta.")
+    if respuesta is None:
+        raise RuntimeError("No se recibió respuesta de la página.")
+
+    print(f"Respuesta HTTP: {respuesta.status}")
+
+    if respuesta.status >= 400:
+        raise RuntimeError(
+            f"La página devolvió HTTP {respuesta.status}."
+        )
 
     # Solo leemos el estado del producto principal.
     # No buscamos textos de stock por toda la página,
