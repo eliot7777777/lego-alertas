@@ -28,6 +28,7 @@ PRODUCTOS = {
 }
 
 ARCHIVO_ESTADO = Path("estado.json")
+SELECTOR_ESTADO = '[data-test="product-overview-availability"]'
 
 
 def cargar_estado():
@@ -44,14 +45,18 @@ def cargar_estado():
 
 
 def guardar_estado(estado):
-    # Guardado atómico para evitar archivos incompletos.
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
         dir=".",
         delete=False,
     ) as archivo:
-        json.dump(estado, archivo, ensure_ascii=False, indent=2)
+        json.dump(
+            estado,
+            archivo,
+            ensure_ascii=False,
+            indent=2,
+        )
         archivo.write("\n")
         temporal = archivo.name
 
@@ -76,14 +81,16 @@ def enviar_telegram(texto):
 
     try:
         with urllib.request.urlopen(
-            peticion, timeout=30
+            peticion,
+            timeout=30,
         ) as respuesta:
             resultado = json.load(respuesta)
 
         if not resultado.get("ok"):
             raise ValueError("Envío rechazado.")
+
     except Exception:
-        # No mostramos excepciones que puedan contener el token.
+        # Evitamos mostrar errores que puedan contener el token.
         raise RuntimeError(
             "No se pudo enviar la alerta a Telegram."
         ) from None
@@ -97,26 +104,34 @@ def consultar_estado(pagina, producto):
     )
 
     if respuesta is None:
-        raise RuntimeError("No se recibió respuesta de la página.")
-
-    print(f"Respuesta HTTP: {respuesta.status}")
-
-    if respuesta.status >= 400:
-        print(f"Título: {pagina.title()}")
-        contenido = pagina.locator("body").inner_text(timeout=10000)
-        print(f"Respuesta de la página: {contenido[:1500]}")
         raise RuntimeError(
-            f"La página devolvió HTTP {respuesta.status}."
+            "No se recibió respuesta de la página."
         )
 
-    # Solo leemos el estado del producto principal.
-    # No buscamos textos de stock por toda la página,
-    # porque podrían pertenecer a productos recomendados.
-    elemento = pagina.locator(
-        '[data-test="product-overview-availability"]'
-    )
+    http_inicial = respuesta.status
+    print(f"HTTP inicial: {http_inicial}", flush=True)
 
-    elemento.first.wait_for(state="visible", timeout=30000)
+    # No abortamos inmediatamente por el HTTP inicial.
+    # Esperamos el campo del producto, igual que en la prueba.
+    elemento = pagina.locator(SELECTOR_ESTADO)
+
+    try:
+        elemento.first.wait_for(
+            state="visible",
+            timeout=30000,
+        )
+    except Exception:
+        try:
+            titulo = pagina.title()
+        except Exception:
+            titulo = "No se pudo obtener el título"
+
+        raise RuntimeError(
+            "No apareció el campo de disponibilidad "
+            "en 30 segundos. "
+            f"HTTP inicial: {http_inicial}. "
+            f"Título final: {titulo}"
+        ) from None
 
     if elemento.count() != 1:
         raise RuntimeError(
@@ -126,8 +141,11 @@ def consultar_estado(pagina, producto):
     texto = " ".join(elemento.inner_text().split())
 
     if not texto or len(texto) > 200:
-        raise RuntimeError("El estado leído no es válido.")
+        raise RuntimeError(
+            "El estado leído no es válido."
+        )
 
+    print(f"Estado leído: {texto}", flush=True)
     return texto
 
 
@@ -136,60 +154,89 @@ def main():
     hubo_errores = False
 
     with sync_playwright() as playwright:
-        navegador = playwright.chromium.launch(headless=True)
-        contexto = navegador.new_context(
-            locale="es-ES",
-            timezone_id="Europe/Madrid",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/153.0.0.0 Safari/537.36"
-            ),
+        navegador = playwright.chromium.launch(
+            headless=True,
         )
-        pagina = contexto.new_page()
 
-        for codigo, producto in PRODUCTOS.items():
-            try:
-                actual = consultar_estado(pagina, producto)
-                anterior = estado.get(codigo)
+        try:
+            contexto = navegador.new_context(
+                locale="es-ES",
+                timezone_id="Europe/Madrid",
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/153.0.0.0 Safari/537.36"
+                ),
+            )
 
-                if anterior is None:
-                    # Primera consulta: guardamos la referencia
-                    # sin enviar una alerta de cambio.
-                    estado[codigo] = actual
-                    guardar_estado(estado)
-                    print(f"{codigo}: estado inicial: {actual}")
+            pagina = contexto.new_page()
 
-                elif actual != anterior:
-                    hora = datetime.now(
-                        ZoneInfo("Europe/Madrid")
-                    ).strftime("%d/%m/%Y %H:%M")
+            for codigo, producto in PRODUCTOS.items():
+                print(
+                    f"\nConsultando {codigo}...",
+                    flush=True,
+                )
 
-                    enviar_telegram(
-                        f"🔔 LEGO {codigo}: {producto['nombre']}\n\n"
-                        f"Antes: {anterior}\n"
-                        f"Ahora: {actual}\n\n"
-                        f"Hora: {hora} (Madrid)\n"
-                        f"{producto['url']}"
+                try:
+                    actual = consultar_estado(
+                        pagina,
+                        producto,
+                    )
+                    anterior = estado.get(codigo)
+
+                    if anterior is None:
+                        # Primera lectura: referencia sin alerta.
+                        estado[codigo] = actual
+                        guardar_estado(estado)
+                        print(
+                            f"{codigo}: estado inicial: {actual}",
+                            flush=True,
+                        )
+
+                    elif actual != anterior:
+                        hora = datetime.now(
+                            ZoneInfo("Europe/Madrid")
+                        ).strftime("%d/%m/%Y %H:%M")
+
+                        enviar_telegram(
+                            f"🔔 LEGO {codigo}: "
+                            f"{producto['nombre']}\n\n"
+                            f"Antes: {anterior}\n"
+                            f"Ahora: {actual}\n\n"
+                            f"Hora: {hora} (Madrid)\n"
+                            f"{producto['url']}"
+                        )
+
+                        # Guardamos solo después del envío correcto.
+                        estado[codigo] = actual
+                        guardar_estado(estado)
+
+                        print(
+                            f"{codigo}: cambio notificado: {actual}",
+                            flush=True,
+                        )
+
+                    else:
+                        print(
+                            f"{codigo}: sin cambios: {actual}",
+                            flush=True,
+                        )
+
+                except Exception as error:
+                    hubo_errores = True
+                    print(
+                        f"{codigo}: "
+                        f"{type(error).__name__}: {error}",
+                        flush=True,
+                    )
+                    print(
+                        "No se confirma un nuevo estado "
+                        "para este producto.",
+                        flush=True,
                     )
 
-                    # Actualizamos solo si se envió la alerta.
-                    estado[codigo] = actual
-                    guardar_estado(estado)
-                    print(f"{codigo}: cambio notificado: {actual}")
-
-                else:
-                    print(f"{codigo}: sin cambios: {actual}")
-
-            except Exception as error:
-                hubo_errores = True
-                print(
-                    f"{codigo}: {type(error).__name__}: {error}"
-                )
-                print("Se conserva el estado anterior.")
-
-        contexto.close()
-        navegador.close()
+        finally:
+            navegador.close()
 
     if hubo_errores:
         raise SystemExit(1)
